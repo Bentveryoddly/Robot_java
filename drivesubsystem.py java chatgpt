@@ -1,0 +1,218 @@
+package frc.robot.subsystems;
+
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.kinematics.SwerveDrive4Kinematics;
+import edu.wpi.first.math.kinematics.SwerveDrive4Odometry;
+import edu.wpi.first.math.trajectory.TrapezoidProfile;
+import edu.wpi.first.math.util.Units;
+import edu.wpi.first.wpilibj.SPI;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import navx.AHRS;
+import frc.robot.constants.DriveConstants;
+import frc.robot.swerveutils.SwerveUtils;
+import frc.robot.subsystems.MAXSwerveModule;
+import frc.robot.swerveutils.SwerveModuleState;
+
+public class DriveSubsystem extends SubsystemBase {
+
+    private final MAXSwerveModule frontLeft;
+    private final MAXSwerveModule frontRight;
+    private final MAXSwerveModule rearLeft;
+    private final MAXSwerveModule rearRight;
+    private final AHRS gyro;
+
+    private double currentRotation;
+    private double currentTranslationDir;
+    private double currentTranslationMag;
+
+    private final SlewRateLimiter magLimiter;
+    private final SlewRateLimiter rotLimiter;
+    private double prevTime;
+
+    private final SwerveDrive4Odometry odometry;
+
+    public DriveSubsystem() {
+        frontLeft = new MAXSwerveModule(
+            DriveConstants.kFrontLeftDrivingCanId,
+            DriveConstants.kFrontLeftTurningCanId,
+            DriveConstants.kFrontLeftChassisAngularOffset
+        );
+
+        frontRight = new MAXSwerveModule(
+            DriveConstants.kFrontRightDrivingCanId,
+            DriveConstants.kFrontRightTurningCanId,
+            DriveConstants.kFrontRightChassisAngularOffset
+        );
+
+        rearLeft = new MAXSwerveModule(
+            DriveConstants.kRearLeftDrivingCanId,
+            DriveConstants.kRearLeftTurningCanId,
+            DriveConstants.kBackLeftChassisAngularOffset
+        );
+
+        rearRight = new MAXSwerveModule(
+            DriveConstants.kRearRightDrivingCanId,
+            DriveConstants.kRearRightTurningCanId,
+            DriveConstants.kBackRightChassisAngularOffset
+        );
+
+        gyro = new AHRS(SPI.Port.kMXP);
+
+        currentRotation = 0.0;
+        currentTranslationDir = 0.0;
+        currentTranslationMag = 0.0;
+
+        magLimiter = new SlewRateLimiter(DriveConstants.kMagnitudeSlewRate);
+        rotLimiter = new SlewRateLimiter(DriveConstants.kRotationalSlewRate);
+        prevTime = Timer.getFPGATimestamp();
+
+        odometry = new SwerveDrive4Odometry(
+            DriveConstants.kDriveKinematics,
+            Rotation2d.fromDegrees(gyro.getAngle()),
+            new SwerveModuleState[]{
+                frontLeft.getPosition(),
+                frontRight.getPosition(),
+                rearLeft.getPosition(),
+                rearRight.getPosition()
+            }
+        );
+    }
+
+    @Override
+    public void periodic() {
+        SmartDashboard.putNumber("Heading Value", getHeading());
+        odometry.update(
+            Rotation2d.fromDegrees(gyro.getAngle()),
+            frontLeft.getPosition(),
+            frontRight.getPosition(),
+            rearLeft.getPosition(),
+            rearRight.getPosition()
+        );
+    }
+
+    public Pose2d getPose() {
+        return odometry.getPose();
+    }
+
+    public void resetOdometry(Pose2d pose) {
+        odometry.resetPosition(
+            Rotation2d.fromDegrees(gyro.getAngle()),
+            pose,
+            frontLeft.getPosition(),
+            frontRight.getPosition(),
+            rearLeft.getPosition(),
+            rearRight.getPosition()
+        );
+    }
+
+    public void drive(double xSpeed, double ySpeed, double rot, boolean fieldRelative, boolean rateLimit) {
+        double xSpeedCommanded = xSpeed;
+        double ySpeedCommanded = ySpeed;
+
+        if (rateLimit) {
+            double inputTranslationDir = Math.atan2(ySpeed, xSpeed);
+            double inputTranslationMag = Math.sqrt(xSpeed * xSpeed + ySpeed * ySpeed);
+
+            double directionSlewRate = (currentTranslationMag != 0.0)
+                ? Math.abs(DriveConstants.kDirectionSlewRate / currentTranslationMag)
+                : 500.0;
+
+            double currentTime = Timer.getFPGATimestamp();
+            double elapsedTime = currentTime - prevTime;
+            double angleDif = SwerveUtils.angleDifference(inputTranslationDir, currentTranslationDir);
+            
+            if (angleDif < 0.45 * Math.PI) {
+                currentTranslationDir = SwerveUtils.stepTowardsCircular(
+                    currentTranslationDir,
+                    inputTranslationDir,
+                    directionSlewRate * elapsedTime
+                );
+                currentTranslationMag = magLimiter.calculate(inputTranslationMag);
+            } else if (angleDif > 0.85 * Math.PI) {
+                if (currentTranslationMag > 1e-4) {
+                    currentTranslationMag = magLimiter.calculate(0.0);
+                } else {
+                    currentTranslationDir = SwerveUtils.wrapAngle(currentTranslationDir + Math.PI);
+                    currentTranslationMag = magLimiter.calculate(inputTranslationMag);
+                }
+            } else {
+                currentTranslationDir = SwerveUtils.stepTowardsCircular(
+                    currentTranslationDir,
+                    inputTranslationDir,
+                    directionSlewRate * elapsedTime
+                );
+                currentTranslationMag = magLimiter.calculate(0.0);
+            }
+
+            prevTime = currentTime;
+
+            xSpeedCommanded = currentTranslationMag * Math.cos(currentTranslationDir);
+            ySpeedCommanded = currentTranslationMag * Math.sin(currentTranslationDir);
+            currentRotation = rotLimiter.calculate(rot);
+        } else {
+            currentRotation = rot;
+        }
+
+        double xSpeedDelivered = xSpeedCommanded * DriveConstants.kMaxSpeedMetersPerSecond;
+        double ySpeedDelivered = ySpeedCommanded * DriveConstants.kMaxSpeedMetersPerSecond;
+        double rotDelivered = currentRotation * DriveConstants.kMaxAngularSpeed;
+
+        SwerveModuleState[] swerveModuleStates = DriveConstants.kDriveKinematics.toSwerveModuleStates(
+            ChassisSpeeds.fromFieldRelativeSpeeds(
+                xSpeedDelivered,
+                ySpeedDelivered,
+                rotDelivered,
+                fieldRelative ? Rotation2d.fromDegrees(gyro.getYaw()) : Rotation2d.fromDegrees(0.0)
+            )
+        );
+
+        swerveModuleStates = SwerveDrive4Kinematics.desaturateWheelSpeeds(
+            swerveModuleStates, DriveConstants.kMaxSpeedMetersPerSecond
+        );
+
+        frontLeft.setDesiredState(swerveModuleStates[0]);
+        frontRight.setDesiredState(swerveModuleStates[1]);
+        rearLeft.setDesiredState(swerveModuleStates[2]);
+        rearRight.setDesiredState(swerveModuleStates[3]);
+    }
+
+    public void setX() {
+        frontLeft.setDesiredState(new SwerveModuleState(0, Rotation2d.fromDegrees(45)));
+        frontRight.setDesiredState(new SwerveModuleState(0, Rotation2d.fromDegrees(-45)));
+        rearLeft.setDesiredState(new SwerveModuleState(0, Rotation2d.fromDegrees(-45)));
+        rearRight.setDesiredState(new SwerveModuleState(0, Rotation2d.fromDegrees(45)));
+    }
+
+    public void setModuleStates(SwerveModuleState[] desiredStates) {
+        desiredStates = SwerveDrive4Kinematics.desaturateWheelSpeeds(
+            desiredStates, DriveConstants.kMaxSpeedMetersPerSecond
+        );
+        frontLeft.setDesiredState(desiredStates[0]);
+        frontRight.setDesiredState(desiredStates[1]);
+        rearLeft.setDesiredState(desiredStates[2]);
+        rearRight.setDesiredState(desiredStates[3]);
+    }
+
+    public void resetEncoders() {
+        frontLeft.resetEncoders();
+        rearLeft.resetEncoders();
+        frontRight.resetEncoders();
+        rearRight.resetEncoders();
+    }
+
+    public void zeroHeading() {
+        gyro.reset();
+    }
+
+    public double getHeading() {
+        return gyro.getYaw();
+    }
+
+    public double getTurnRate() {
+        return gyro.getRate() * (DriveConstants.kGyroReversed ? -1.0 : 1.0);
+    }
+}
