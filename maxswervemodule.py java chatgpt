@@ -1,0 +1,126 @@
+package frc.robot.subsystems;
+
+import com.revrobotics.CANSparkMax;
+import com.revrobotics.CANSparkMax.IdleMode;
+import com.revrobotics.CANSparkMax.ControlType;
+import com.revrobotics.CANSparkMax.SoftLimitDirection;
+import com.revrobotics.SparkMaxAbsoluteEncoder;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.kinematics.SwerveModuleState;
+import edu.wpi.first.math.kinematics.SwerveModulePosition;
+import frc.robot.constants.ModuleConstants;
+
+public class MAXSwerveModule {
+
+    private final CANSparkMax drivingSparkMax;
+    private final CANSparkMax turningSparkMax;
+    private final SparkMaxAbsoluteEncoder drivingEncoder;
+    private final SparkMaxAbsoluteEncoder turningEncoder;
+    private final CANSparkMaxPIDController drivingPIDController;
+    private final CANSparkMaxPIDController turningPIDController;
+
+    private final double chassisAngularOffset;
+    private SwerveModuleState desiredState;
+
+    public MAXSwerveModule(int drivingCANId, int turningCANId, double chassisAngularOffset) {
+        this.chassisAngularOffset = chassisAngularOffset;
+
+        this.drivingSparkMax = new CANSparkMax(drivingCANId, CANSparkMax.MotorType.kBrushless);
+        this.turningSparkMax = new CANSparkMax(turningCANId, CANSparkMax.MotorType.kBrushless);
+
+        // Factory reset to ensure the motors are in a known state.
+        this.drivingSparkMax.restoreFactoryDefaults();
+        this.turningSparkMax.restoreFactoryDefaults();
+
+        // Setup encoders and PID controllers.
+        this.drivingEncoder = this.drivingSparkMax.getEncoder();
+        this.turningEncoder = this.turningSparkMax.getAbsoluteEncoder(SparkMaxAbsoluteEncoder.Type.kDutyCycle);
+        this.drivingPIDController = this.drivingSparkMax.getPIDController();
+        this.turningPIDController = this.turningSparkMax.getPIDController();
+
+        this.drivingPIDController.setFeedbackDevice(this.drivingEncoder);
+        this.turningPIDController.setFeedbackDevice(this.turningEncoder);
+
+        // Apply position and velocity conversion factors for the driving encoder.
+        this.drivingEncoder.setPositionConversionFactor(ModuleConstants.kDrivingEncoderPositionFactor);
+        this.drivingEncoder.setVelocityConversionFactor(ModuleConstants.kDrivingEncoderVelocityFactor);
+
+        // Apply position and velocity conversion factors for the turning encoder.
+        this.turningEncoder.setPositionConversionFactor(ModuleConstants.kTurningEncoderPositionFactor);
+        this.turningEncoder.setVelocityConversionFactor(ModuleConstants.kTurningEncoderVelocityFactor);
+
+        // Invert the turning encoder.
+        this.turningEncoder.setInverted(ModuleConstants.kTurningEncoderInverted);
+
+        // Enable PID wrapping for the turning motor.
+        this.turningPIDController.setPositionPIDWrappingEnabled(true);
+        this.turningPIDController.setPositionPIDWrappingMinInput(ModuleConstants.kTurningEncoderPositionPIDMinInput);
+        this.turningPIDController.setPositionPIDWrappingMaxInput(ModuleConstants.kTurningEncoderPositionPIDMaxInput);
+
+        // Set PID gains for the driving motor.
+        this.drivingPIDController.setP(ModuleConstants.kDrivingP);
+        this.drivingPIDController.setI(ModuleConstants.kDrivingI);
+        this.drivingPIDController.setD(ModuleConstants.kDrivingD);
+        this.drivingPIDController.setFF(ModuleConstants.kDrivingFF);
+        this.drivingPIDController.setOutputRange(ModuleConstants.kDrivingMinOutput, ModuleConstants.kDrivingMaxOutput);
+
+        // Set PID gains for the turning motor.
+        this.turningPIDController.setP(ModuleConstants.kTurningP);
+        this.turningPIDController.setI(ModuleConstants.kTurningI);
+        this.turningPIDController.setD(ModuleConstants.kTurningD);
+        this.turningPIDController.setFF(ModuleConstants.kTurningFF);
+        this.turningPIDController.setOutputRange(ModuleConstants.kTurningMinOutput, ModuleConstants.kTurningMaxOutput);
+
+        // Set idle mode and current limits.
+        this.drivingSparkMax.setIdleMode(IdleMode.kBrake);
+        this.turningSparkMax.setIdleMode(IdleMode.kBrake);
+        this.drivingSparkMax.setSmartCurrentLimit(ModuleConstants.kDrivingMotorCurrentLimit);
+        this.turningSparkMax.setSmartCurrentLimit(ModuleConstants.kTurningMotorCurrentLimit);
+
+        // Save configurations.
+        this.drivingSparkMax.burnFlash();
+        this.turningSparkMax.burnFlash();
+
+        // Initialize desired state.
+        this.desiredState = new SwerveModuleState(0.0, new Rotation2d());
+        this.drivingEncoder.setPosition(0);
+    }
+
+    public SwerveModuleState getState() {
+        return new SwerveModuleState(
+            this.drivingEncoder.getVelocity(),
+            new Rotation2d(this.turningEncoder.getPosition() - this.chassisAngularOffset)
+        );
+    }
+
+    public SwerveModulePosition getPosition() {
+        return new SwerveModulePosition(
+            this.drivingEncoder.getPosition(),
+            new Rotation2d(this.turningEncoder.getPosition() - this.chassisAngularOffset)
+        );
+    }
+
+    public void setDesiredState(SwerveModuleState desiredState) {
+        SwerveModuleState correctedDesiredState = new SwerveModuleState(
+            desiredState.speed,
+            desiredState.angle.plus(new Rotation2d(this.chassisAngularOffset))
+        );
+
+        SwerveModuleState optimizedDesiredState = SwerveModuleState.optimize(
+            correctedDesiredState, new Rotation2d(this.turningEncoder.getPosition())
+        );
+
+        this.drivingPIDController.setReference(
+            optimizedDesiredState.speed, ControlType.kVelocity
+        );
+        this.turningPIDController.setReference(
+            optimizedDesiredState.angle.getRadians(), ControlType.kPosition
+        );
+
+        this.desiredState = desiredState;
+    }
+
+    public void resetEncoders() {
+        this.drivingEncoder.setPosition(0);
+    }
+}
