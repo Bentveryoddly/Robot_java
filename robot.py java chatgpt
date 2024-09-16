@@ -1,0 +1,37 @@
+package frc.robot;
+
+import edu.wpi.first.wpilibj.TimedRobot;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
+import edu.wpi.first.wpilibj.command.CommandScheduler;
+import frc.robot.subsystems.RobotContainer;
+
+public class MyRobot extends TimedRobot {
+
+    private RobotContainer container;
+
+    @Override
+    public void robotInit() {
+        // Instantiate our RobotContainer. This will perform all our button bindings, and put our
+        // autonomous chooser on the dashboard.
+        container = new RobotContainer();
+    }
+
+    // Work in progress for setting up Shuffleboard for useful info in testing.
+    // @Override
+     public void robotPeriodic() {
+         SmartDashboard.putNumber("Strafe", container.getSomeValue());
+         SmartDashboard.putBoolean("Some Boolean", container.getSomeBoolean());
+     }
+
+    @Override
+    public void teleopInit() {
+        // Reinitialize the RobotContainer if needed
+        container = new RobotContainer();
+    }
+
+    @Override
+    public void testInit() {
+        CommandScheduler.getInstance().cancelAll();
+    }
+}
