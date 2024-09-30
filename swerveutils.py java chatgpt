@@ -1,0 +1,83 @@
+import static java.lang.Math.*;
+
+public class AngleUtils {
+
+    public static double stepTowards(double current, double target, double stepSize) {
+        /** 
+         * Steps a value towards a target with a specified step size.
+         *
+         * @param current  The current or starting value. Can be positive or negative.
+         * @param target   The target value the algorithm will step towards. Can be positive or negative.
+         * @param stepSize The maximum step size that can be taken.
+         * @return The new value for current after performing the specified step towards the specified target.
+         */
+        if (abs(current - target) <= stepSize) {
+            return target;
+        } else if (target < current) {
+            return current - stepSize;
+        } else {
+            return current + stepSize;
+        }
+    }
+
+    public static double stepTowardsCircular(double current, double target, double stepSize) {
+        /** 
+         * Steps a value (angle) towards a target (angle) taking the shortest path with a specified step size.
+         *
+         * @param current  The current or starting angle (in radians).
+         * @param target   The target angle (in radians) the algorithm will step towards.
+         * @param stepSize The maximum step size that can be taken (in radians).
+         * @return The new angle (in radians) for current after performing the specified step towards the specified target.
+         * This value will always lie in the range 0 to 2*PI (exclusive).
+         */
+        current = wrapAngle(current);
+        target = wrapAngle(target);
+
+        double stepDirection = signum(target - current);
+        double difference = abs(current - target);
+
+        if (difference <= stepSize) {
+            return target;
+        } else if (difference > PI) {
+            if (current + 2 * PI - target < stepSize || target + 2 * PI - current < stepSize) {
+                return target;
+            } else {
+                return wrapAngle(current - stepDirection * stepSize);
+            }
+        } else {
+            return current + stepDirection * stepSize;
+        }
+    }
+
+    public static double angleDifference(double angleA, double angleB) {
+        /** 
+         * Finds the (unsigned) minimum difference between two angles including calculating across 0.
+         *
+         * @param angleA An angle (in radians).
+         * @param angleB An angle (in radians).
+         * @return The (unsigned) minimum difference between the two angles (in radians).
+         */
+        double difference = abs(angleA - angleB);
+        return difference > PI ? (2 * PI - difference) : difference;
+    }
+
+    public static double wrapAngle(double angle) {
+        /** 
+         * Wraps an angle until it lies within the range from 0 to 2*PI (exclusive).
+         *
+         * @param angle The angle (in radians) to wrap.
+         * @return An angle (in radians) from 0 and 2*PI (exclusive).
+         */
+        double twoPi = 2 * PI;
+
+        if (angle == twoPi) {
+            return 0.0;
+        } else if (angle > twoPi) {
+            return angle - twoPi * floor(angle / twoPi);
+        } else if (angle < 0.0) {
+            return angle + twoPi * (floor(-angle / twoPi) + 1);
+        } else {
+            return angle;
+        }
+    }
+}
