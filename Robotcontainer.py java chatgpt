@@ -1,0 +1,96 @@
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.trajectory.TrajectoryConfig;
+import edu.wpi.first.math.trajectory.TrajectoryGenerator;
+import edu.wpi.first.wpilibj.XboxController;
+import edu.wpi.first.wpilibj.command.Command;
+import edu.wpi.first.wpilibj.command.RunCommand;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
+
+import static constants.AutoConstants;
+import static constants.DriveConstants;
+import static constants.OIConstants;
+
+public class RobotContainer {
+    private final DriveSubsystem robotDrive;
+    private final XboxController driverController;
+    private final XboxController operatorController;
+
+    public RobotContainer() {
+        // Initialize the robot's subsystems
+        robotDrive = new DriveSubsystem();
+        
+        // Initialize the driver controllers
+        driverController = new XboxController(OIConstants.kDriverControllerPort);
+        operatorController = new XboxController(OIConstants.kOperatorControllerPort);
+
+        // Configure button bindings
+        configureButtonBindings();
+
+        // Configure default commands
+        robotDrive.setDefaultCommand(new RunCommand(() -> {
+            double heading = robotDrive.getHeading();
+            double leftY = driverController.getLeftY();
+            double leftX = driverController.getLeftX();
+            double rightX = driverController.getRightX();
+
+            double translationX = -applyDeadband(
+                (leftY * Math.sin(Math.toRadians(heading))) +
+                (leftX * Math.cos(Math.toRadians(heading))), 
+                OIConstants.kDriveDeadband
+            );
+
+            double translationY = -applyDeadband(
+                (-leftY * Math.cos(Math.toRadians(heading))) +
+                (leftX * Math.sin(Math.toRadians(heading))), 
+                OIConstants.kDriveDeadband
+            );
+
+            double rotation = -applyDeadband(rightX, OIConstants.kDriveDeadband);
+
+            robotDrive.drive(translationX, translationY, rotation, true, false);
+        }, robotDrive));
+    }
+
+    private void configureButtonBindings() {
+        // Set wheels to X (brake)
+        new JoystickButton(driverController, 7).toggleOnTrue(new RunCommand(() -> robotDrive.setX(), robotDrive));
+
+        // Slow mode
+        new JoystickButton(driverController, 6).toggleOnTrue(new RunCommand(() -> {
+            double heading = robotDrive.getHeading();
+            double leftY = driverController.getLeftY();
+            double leftX = driverController.getLeftX();
+            double rightX = driverController.getRightX();
+
+            double translationX = -applyDeadband(
+                ((leftY * Math.sin(Math.toRadians(heading))) +
+                (leftX * Math.cos(Math.toRadians(heading)))) * 0.5, 
+                OIConstants.kDriveDeadband
+            );
+
+            double translationY = -applyDeadband(
+                ((-leftY * Math.cos(Math.toRadians(heading))) +
+                (leftX * Math.sin(Math.toRadians(heading)))) * 0.5, 
+                OIConstants.kDriveDeadband
+            );
+
+            double rotation = -applyDeadband(rightX * 0.5, OIConstants.kDriveDeadband);
+
+            robotDrive.drive(translationX, translationY, rotation, true, false);
+        }, robotDrive));
+    }
+
+    private double applyDeadband(double value, double deadband) {
+        if (Math.abs(value) < deadband) {
+            return 0;
+        }
+        return value;
+    }
+
+    public void disablePIDSubsystems() {
+        // Implement disabling of PID subsystems if necessary
+    }
+}
